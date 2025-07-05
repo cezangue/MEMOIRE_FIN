@@ -26,6 +26,12 @@ if uploaded_file is not None:
         df = df[df['Zone ecologique'] == filter_zone]
     st.write("Aperçu des Données:", df.head())
 
+    # Convertir Latitude_GPS et Longitude_GPS en numériques, remplacer les valeurs invalides par NaN
+    if 'Latitude_GPS' in df.columns:
+        df['Latitude_GPS'] = pd.to_numeric(df['Latitude_GPS'], errors='coerce')
+    if 'Longitude_GPS' in df.columns:
+        df['Longitude_GPS'] = pd.to_numeric(df['Longitude_GPS'], errors='coerce')
+
     if weight_col not in df.columns:
         st.error(f"La variable de pondération '{weight_col}' n'a pas été trouvée.")
     else:
@@ -63,8 +69,13 @@ if uploaded_file is not None:
                 pop_table = df.groupby(geo_level).agg({weight_col: 'sum'}).rename(columns={weight_col: 'Poids Total'})
                 st.table(pop_table)
                 if 'Latitude_GPS' in df.columns and 'Longitude_GPS' in df.columns:
-                    fig = px.scatter_mapbox(df, lat='Latitude_GPS', lon='Longitude_GPS', color='EAU', zoom=5)
-                    st.plotly_chart(fig)
+                    # Filtrer les lignes avec des valeurs numériques valides
+                    df_map = df.dropna(subset=['Latitude_GPS', 'Longitude_GPS'])
+                    if not df_map.empty:
+                        fig = px.scatter_mapbox(df_map, lat='Latitude_GPS', lon='Longitude_GPS', color='EAU', zoom=5)
+                        st.plotly_chart(fig)
+                    else:
+                        st.warning("Aucune donnée valide pour la carte (Latitude_GPS ou Longitude_GPS manquants ou invalides).")
 
             st.header("Évaluation d'Impact")
             method = st.selectbox("Méthode", ["Double Différence"])
