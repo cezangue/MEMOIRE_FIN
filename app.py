@@ -88,6 +88,11 @@ if uploaded_file is not None:
                     benef = df[T].copy()
                     non_benef = df[~T].copy()
 
+                    # Débogage : Vérifier les tailles des sous-ensembles
+                    st.write("Nombre de lignes dans benef:", len(benef))
+                    st.write("Nombre de lignes dans non_benef:", len(non_benef))
+                    st.write("Valeurs uniques de EAU:", df['EAU'].unique())
+
                     # Convertir et valider les colonnes pour X_benef et X_non_benef
                     numeric_cols = benef.select_dtypes(include=['int64', 'float64']).columns
                     X_cols = [col for col in benef.columns if col not in ['durée_disponibilite_acces_eau_avantH', 'durée_dispisponibilite_acces_eau_apresH', weight_col, 'EAU']]
@@ -108,8 +113,12 @@ if uploaded_file is not None:
                         X_benef = benef[X_cols].values
                         X_non_benef = non_benef[X_cols].values
 
+                        # Débogage : Vérifier les tailles des tableaux
+                        st.write("Taille de X_benef:", X_benef.shape if X_benef.size > 0 else "Vide")
+                        st.write("Taille de X_non_benef:", X_non_benef.shape if X_non_benef.size > 0 else "Vide")
+
                         if X_benef.size == 0 or X_non_benef.size == 0:
-                            st.warning("Aucune donnée numérique valide pour le matching.")
+                            st.warning("Aucune donnée numérique valide pour le matching. Vérifiez les filtres sur 'EAU' ou les données manquantes dans X_cols.")
                         else:
                             regions = df['Region'].unique()
                             matches = []
