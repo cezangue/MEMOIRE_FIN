@@ -96,10 +96,17 @@ if uploaded_file is not None:
                     if not X_cols:
                         st.error("Aucune colonne numérique disponible pour l'évaluation d'impact.")
                     else:
+                        # Appliquer la conversion et le nettoyage au niveau global
                         benef[X_cols] = benef[X_cols].apply(pd.to_numeric, errors='coerce')
                         non_benef[X_cols] = non_benef[X_cols].apply(pd.to_numeric, errors='coerce')
                         benef = benef.dropna(subset=X_cols)
                         non_benef = non_benef.dropna(subset=X_cols)
+
+                        # Vérifier les types après conversion
+                        for col in X_cols:
+                            if benef[col].dtype not in ['int64', 'float64'] or non_benef[col].dtype not in ['int64', 'float64']:
+                                st.error(f"La colonne {col} contient des données non numériques après conversion.")
+                                X_cols.remove(col)
 
                         X_benef = benef[X_cols].values
                         X_non_benef = non_benef[X_cols].values
@@ -110,29 +117,38 @@ if uploaded_file is not None:
                             regions = df['Region'].unique()
                             matches = []
                             for region in regions:
-                                benef_region = benef[benef['Region'] == region]
-                                non_benef_region = non_benef[non_benef['Region'] == region]
+                                benef_region = benef[benef['Region'] == region].copy()
+                                non_benef_region = non_benef[non_benef['Region'] == region].copy()
+                                # Nettoyage strict au niveau régional
+                                benef_region[X_cols] = benef_region[X_cols].apply(pd.to_numeric, errors='coerce')
+                                non_benef_region[X_cols] = non_benef_region[X_cols].apply(pd.to_numeric, errors='coerce')
+                                benef_region = benef_region.dropna(subset=X_cols)
+                                non_benef_region = non_benef_region.dropna(subset=X_cols)
+
                                 if len(benef_region) > 0 and len(non_benef_region) > 0:
                                     X_benef_region = benef_region[X_cols].values
                                     X_non_benef_region = non_benef_region[X_cols].values
                                     if X_benef_region.size > 0 and X_non_benef_region.size > 0:
-                                        cov_matrix = np.cov(np.vstack([X_benef_region, X_non_benef_region]).T)
-                                        cov_inv = pinv(cov_matrix)
-                                        distances = cdist(X_non_benef_region, X_benef_region, metric='mahalanobis', VI=cov_inv)
-                                        threshold = np.percentile(distances, 90)
-                                        for i in range(len(non_benef_region)):
-                                            min_dist_idx = np.argmin(distances[i])
-                                            if distances[i, min_dist_idx] < threshold:
-                                                matches.append({
-                                                    'non_benef_id': non_benef_region.index[i],
-                                                    'benef_id': benef_region.index[min_dist_idx],
-                                                    'non_benef_avant': non_benef_region.iloc[i]['durée_disponibilite_acces_eau_avantH'],
-                                                    'non_benef_apres': non_benef_region.iloc[i]['durée_dispisponibilite_acces_eau_apresH'],
-                                                    'benef_avant': benef_region.iloc[min_dist_idx]['durée_disponibilite_acces_eau_avantH'],
-                                                    'benef_apres': benef_region.iloc[min_dist_idx]['durée_dispisponibilite_acces_eau_apresH'],
-                                                    'weight': non_benef_region.iloc[i][weight_col],
-                                                    'Region': region
-                                                })
+                                        try:
+                                            cov_matrix = np.cov(np.vstack([X_benef_region, X_non_benef_region]).T)
+                                            cov_inv = pinv(cov_matrix)
+                                            distances = cdist(X_non_benef_region, X_benef_region, metric='mahalanobis', VI=cov_inv)
+                                            threshold = np.percentile(distances, 90)
+                                            for i in range(len(non_benef_region)):
+                                                min_dist_idx = np.argmin(distances[i])
+                                                if distances[i, min_dist_idx] < threshold:
+                                                    matches.append({
+                                                        'non_benef_id': non_benef_region.index[i],
+                                                        'benef_id': benef_region.index[min_dist_idx],
+                                                        'non_benef_avant': non_benef_region.iloc[i]['durée_disponibilite_acces_eau_avantH'],
+                                                        'non_benef_apres': non_benef_region.iloc[i]['durée_dispisponibilite_acces_eau_apresH'],
+                                                        'benef_avant': benef_region.iloc[min_dist_idx]['durée_disponibilite_acces_eau_avantH'],
+                                                        'benef_apres': benef_region.iloc[min_dist_idx]['durée_dispisponibilite_acces_eau_apresH'],
+                                                        'weight': non_benef_region.iloc[i][weight_col],
+                                                        'Region': region
+                                                    })
+                                        except ValueError as e:
+                                            st.warning(f"Erreur dans le calcul de la covariance pour la région {region}: {str(e)}")
                             matched_df = pd.DataFrame(matches)
                             if not matched_df.empty:
                                 matched_df['benef_weight'] = matched_df.groupby('benef_id')['weight'].transform('sum')
