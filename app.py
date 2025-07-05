@@ -71,7 +71,6 @@ if uploaded_file is not None:
                 pop_table = df.groupby(geo_level).agg({weight_col: 'sum'}).rename(columns={weight_col: 'Poids Total'})
                 st.table(pop_table)
                 if 'Latitude_GPS' in df.columns and 'Longitude_GPS' in df.columns:
-                    # Vérifier que les colonnes sont numériques avant la visualisation
                     if df['Latitude_GPS'].dtype in ['float64', 'int64'] and df['Longitude_GPS'].dtype in ['float64', 'int64']:
                         fig = px.scatter_mapbox(df, lat='Latitude_GPS', lon='Longitude_GPS', color='EAU', zoom=5)
                         st.plotly_chart(fig)
@@ -96,17 +95,14 @@ if uploaded_file is not None:
                     if not X_cols:
                         st.error("Aucune colonne numérique disponible pour l'évaluation d'impact.")
                     else:
-                        # Appliquer la conversion et le nettoyage au niveau global
+                        # Conversion et nettoyage global
                         benef[X_cols] = benef[X_cols].apply(pd.to_numeric, errors='coerce')
                         non_benef[X_cols] = non_benef[X_cols].apply(pd.to_numeric, errors='coerce')
                         benef = benef.dropna(subset=X_cols)
                         non_benef = non_benef.dropna(subset=X_cols)
 
-                        # Vérifier les types après conversion
-                        for col in X_cols:
-                            if benef[col].dtype not in ['int64', 'float64'] or non_benef[col].dtype not in ['int64', 'float64']:
-                                st.error(f"La colonne {col} contient des données non numériques après conversion.")
-                                X_cols.remove(col)
+                        # Débogage : Afficher les types de colonnes
+                        st.write("Types de colonnes dans X_cols:", {col: benef[col].dtype for col in X_cols})
 
                         X_benef = benef[X_cols].values
                         X_non_benef = non_benef[X_cols].values
@@ -119,7 +115,7 @@ if uploaded_file is not None:
                             for region in regions:
                                 benef_region = benef[benef['Region'] == region].copy()
                                 non_benef_region = non_benef[non_benef['Region'] == region].copy()
-                                # Nettoyage strict au niveau régional
+                                # Nettoyage strict au niveau régional avec vérification
                                 benef_region[X_cols] = benef_region[X_cols].apply(pd.to_numeric, errors='coerce')
                                 non_benef_region[X_cols] = non_benef_region[X_cols].apply(pd.to_numeric, errors='coerce')
                                 benef_region = benef_region.dropna(subset=X_cols)
@@ -130,6 +126,11 @@ if uploaded_file is not None:
                                     X_non_benef_region = non_benef_region[X_cols].values
                                     if X_benef_region.size > 0 and X_non_benef_region.size > 0:
                                         try:
+                                            # Vérification explicite des types dans la région
+                                            for col in X_cols:
+                                                if not np.issubdtype(benef_region[col].dtype, np.number) or not np.issubdtype(non_benef_region[col].dtype, np.number):
+                                                    st.error(f"Colonne {col} dans la région {region} contient des données non numériques.")
+                                                    continue
                                             cov_matrix = np.cov(np.vstack([X_benef_region, X_non_benef_region]).T)
                                             cov_inv = pinv(cov_matrix)
                                             distances = cdist(X_non_benef_region, X_benef_region, metric='mahalanobis', VI=cov_inv)
