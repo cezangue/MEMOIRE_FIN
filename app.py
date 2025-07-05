@@ -46,8 +46,9 @@ if uploaded_file is not None:
             quant_cols = df.select_dtypes(include=['float64', 'int64']).columns.tolist()
             qual_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
 
-            quant_selected = st.multiselect("Sélectionnez les variables numériques (covariables)", quant_cols, default=quant_cols[:3])
-            qual_selected = st.multiselect("Sélectionnez les variables catégoriques à dummariser", qual_cols, default=[])
+            # Sélection manuelle des covariables
+            quant_selected = st.multiselect("Sélectionnez les covariables numériques", quant_cols, default=[])
+            qual_selected = st.multiselect("Sélectionnez les covariables catégoriques à dummariser", qual_cols, default=[])
 
             if quant_selected or qual_selected:
                 # Préparation des données avec dummification
@@ -104,7 +105,7 @@ if uploaded_file is not None:
                             st.write("Taille de X_non_benef:", X_non_benef.shape if X_non_benef.size > 0 else "Vide")
 
                             if X_benef.size == 0 or X_non_benef.size == 0:
-                                st.warning("Aucune donnée numérique valide pour le matching. Vérifiez les filtres sur 'EAU' ou les données manquantes dans X_cols.")
+                                st.warning("Aucune donnée numérique valide pour le matching. Vérifiez les covariables sélectionnées ou les données manquantes.")
                             else:
                                 regions = df['Region'].unique()
                                 matches = []
