@@ -26,11 +26,13 @@ if uploaded_file is not None:
         df = df[df['Zone ecologique'] == filter_zone]
     st.write("Aperçu des Données:", df.head())
 
-    # Convertir Latitude_GPS et Longitude_GPS en numériques, remplacer les valeurs invalides par NaN
+    # Nettoyage strict des colonnes Latitude_GPS et Longitude_GPS
     if 'Latitude_GPS' in df.columns:
         df['Latitude_GPS'] = pd.to_numeric(df['Latitude_GPS'], errors='coerce')
+        df = df.dropna(subset=['Latitude_GPS'])
     if 'Longitude_GPS' in df.columns:
         df['Longitude_GPS'] = pd.to_numeric(df['Longitude_GPS'], errors='coerce')
+        df = df.dropna(subset=['Longitude_GPS'])
 
     if weight_col not in df.columns:
         st.error(f"La variable de pondération '{weight_col}' n'a pas été trouvée.")
@@ -69,13 +71,12 @@ if uploaded_file is not None:
                 pop_table = df.groupby(geo_level).agg({weight_col: 'sum'}).rename(columns={weight_col: 'Poids Total'})
                 st.table(pop_table)
                 if 'Latitude_GPS' in df.columns and 'Longitude_GPS' in df.columns:
-                    # Filtrer les lignes avec des valeurs numériques valides
-                    df_map = df.dropna(subset=['Latitude_GPS', 'Longitude_GPS'])
-                    if not df_map.empty:
-                        fig = px.scatter_mapbox(df_map, lat='Latitude_GPS', lon='Longitude_GPS', color='EAU', zoom=5)
+                    # Vérifier que les colonnes sont numériques avant la visualisation
+                    if df['Latitude_GPS'].dtype in ['float64', 'int64'] and df['Longitude_GPS'].dtype in ['float64', 'int64']:
+                        fig = px.scatter_mapbox(df, lat='Latitude_GPS', lon='Longitude_GPS', color='EAU', zoom=5)
                         st.plotly_chart(fig)
                     else:
-                        st.warning("Aucune donnée valide pour la carte (Latitude_GPS ou Longitude_GPS manquants ou invalides).")
+                        st.warning("Les colonnes Latitude_GPS ou Longitude_GPS contiennent des données non numériques.")
 
             st.header("Évaluation d'Impact")
             method = st.selectbox("Méthode", ["Double Différence"])
@@ -88,7 +89,7 @@ if uploaded_file is not None:
                     benef = df[T].copy()
                     non_benef = df[~T].copy()
 
-                    # Convertir les colonnes en numériques pour X_benef et X_non_benef
+                    # Convertir et valider les colonnes pour X_benef et X_non_benef
                     numeric_cols = benef.select_dtypes(include=['int64', 'float64']).columns
                     X_cols = [col for col in benef.columns if col not in ['durée_disponibilite_acces_eau_avantH', 'durée_dispisponibilite_acces_eau_apresH', weight_col, 'EAU']]
                     X_cols = [col for col in X_cols if col in numeric_cols]
@@ -97,9 +98,11 @@ if uploaded_file is not None:
                     else:
                         benef[X_cols] = benef[X_cols].apply(pd.to_numeric, errors='coerce')
                         non_benef[X_cols] = non_benef[X_cols].apply(pd.to_numeric, errors='coerce')
+                        benef = benef.dropna(subset=X_cols)
+                        non_benef = non_benef.dropna(subset=X_cols)
 
-                        X_benef = benef[X_cols].dropna().values
-                        X_non_benef = non_benef[X_cols].dropna().values
+                        X_benef = benef[X_cols].values
+                        X_non_benef = non_benef[X_cols].values
 
                         if X_benef.size == 0 or X_non_benef.size == 0:
                             st.warning("Aucune donnée numérique valide pour le matching.")
@@ -107,28 +110,29 @@ if uploaded_file is not None:
                             regions = df['Region'].unique()
                             matches = []
                             for region in regions:
-                                benef_region = benef[benef['Region'] == region].dropna(subset=X_cols)
-                                non_benef_region = non_benef[non_benef['Region'] == region].dropna(subset=X_cols)
+                                benef_region = benef[benef['Region'] == region]
+                                non_benef_region = non_benef[non_benef['Region'] == region]
                                 if len(benef_region) > 0 and len(non_benef_region) > 0:
                                     X_benef_region = benef_region[X_cols].values
                                     X_non_benef_region = non_benef_region[X_cols].values
-                                    cov_matrix = np.cov(np.vstack([X_benef_region, X_non_benef_region]).T)
-                                    cov_inv = pinv(cov_matrix)
-                                    distances = cdist(X_non_benef_region, X_benef_region, metric='mahalanobis', VI=cov_inv)
-                                    threshold = np.percentile(distances, 90)
-                                    for i in range(len(non_benef_region)):
-                                        min_dist_idx = np.argmin(distances[i])
-                                        if distances[i, min_dist_idx] < threshold:
-                                            matches.append({
-                                                'non_benef_id': non_benef_region.index[i],
-                                                'benef_id': benef_region.index[min_dist_idx],
-                                                'non_benef_avant': non_benef_region.iloc[i]['durée_disponibilite_acces_eau_avantH'],
-                                                'non_benef_apres': non_benef_region.iloc[i]['durée_dispisponibilite_acces_eau_apresH'],
-                                                'benef_avant': benef_region.iloc[min_dist_idx]['durée_disponibilite_acces_eau_avantH'],
-                                                'benef_apres': benef_region.iloc[min_dist_idx]['durée_dispisponibilite_acces_eau_apresH'],
-                                                'weight': non_benef_region.iloc[i][weight_col],
-                                                'Region': region
-                                            })
+                                    if X_benef_region.size > 0 and X_non_benef_region.size > 0:
+                                        cov_matrix = np.cov(np.vstack([X_benef_region, X_non_benef_region]).T)
+                                        cov_inv = pinv(cov_matrix)
+                                        distances = cdist(X_non_benef_region, X_benef_region, metric='mahalanobis', VI=cov_inv)
+                                        threshold = np.percentile(distances, 90)
+                                        for i in range(len(non_benef_region)):
+                                            min_dist_idx = np.argmin(distances[i])
+                                            if distances[i, min_dist_idx] < threshold:
+                                                matches.append({
+                                                    'non_benef_id': non_benef_region.index[i],
+                                                    'benef_id': benef_region.index[min_dist_idx],
+                                                    'non_benef_avant': non_benef_region.iloc[i]['durée_disponibilite_acces_eau_avantH'],
+                                                    'non_benef_apres': non_benef_region.iloc[i]['durée_dispisponibilite_acces_eau_apresH'],
+                                                    'benef_avant': benef_region.iloc[min_dist_idx]['durée_disponibilite_acces_eau_avantH'],
+                                                    'benef_apres': benef_region.iloc[min_dist_idx]['durée_dispisponibilite_acces_eau_apresH'],
+                                                    'weight': non_benef_region.iloc[i][weight_col],
+                                                    'Region': region
+                                                })
                             matched_df = pd.DataFrame(matches)
                             if not matched_df.empty:
                                 matched_df['benef_weight'] = matched_df.groupby('benef_id')['weight'].transform('sum')
