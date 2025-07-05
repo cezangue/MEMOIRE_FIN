@@ -85,50 +85,86 @@ if uploaded_file is not None:
                     Y_after = df['durée_dispisponibilite_acces_eau_apresH']
                     T = df['EAU'] == 'Non'
                     weights = df[weight_col]
-                    benef = df[T]
-                    non_benef = df[~T]
-                    regions = df['Region'].unique()
-                    matches = []
-                    for region in regions:
-                        benef_region = benef[benef['Region'] == region]
-                        non_benef_region = non_benef[non_benef['Region'] == region]
-                        if len(benef_region) > 0 and len(non_benef_region) > 0:
-                            X_benef = benef_region.drop(columns=['durée_disponibilite_acces_eau_avantH', 'durée_dispisponibilite_acces_eau_apresH', weight_col, 'EAU']).values
-                            X_non_benef = non_benef_region.drop(columns=['durée_disponibilite_acces_eau_avantH', 'durée_dispisponibilite_acces_eau_apresH', weight_col, 'EAU']).values
-                            cov_matrix = np.cov(np.vstack([X_benef, X_non_benef]).T)
-                            cov_inv = pinv(cov_matrix)
-                            distances = cdist(X_non_benef, X_benef, metric='mahalanobis', VI=cov_inv)
-                            threshold = np.percentile(distances, 90)
-                            for i in range(len(non_benef_region)):
-                                min_dist_idx = np.argmin(distances[i])
-                                if distances[i, min_dist_idx] < threshold:
-                                    matches.append({
-                                        'non_benef_id': non_benef_region.index[i],
-                                        'benef_id': benef_region.index[min_dist_idx],
-                                        'non_benef_avant': non_benef_region.iloc[i]['durée_disponibilite_acces_eau_avantH'],
-                                        'non_benef_apres': non_benef_region.iloc[i]['durée_dispisponibilite_acces_eau_apresH'],
-                                        'benef_avant': benef_region.iloc[min_dist_idx]['durée_disponibilite_acces_eau_avantH'],
-                                        'benef_apres': benef_region.iloc[min_dist_idx]['durée_dispisponibilite_acces_eau_apresH'],
-                                        'weight': non_benef_region.iloc[i][weight_col],
-                                        'Region': region
-                                    })
-                    matched_df = pd.DataFrame(matches)
-                    if not matched_df.empty:
-                        matched_df['benef_weight'] = matched_df.groupby('benef_id')['weight'].transform('sum')
-                        matched_df['adjusted_weight'] = matched_df['weight'] / matched_df['benef_weight']
-                        data = []
-                        for region in regions:
-                            df_region = matched_df[matched_df['Region'] == region]
-                            if not df_region.empty:
-                                benef_before = np.average(df_region['benef_avant'], weights=df_region['adjusted_weight'])
-                                benef_after = np.average(df_region['benef_apres'], weights=df_region['adjusted_weight'])
-                                non_benef_before = np.average(df_region['non_benef_avant'], weights=df_region['weight'])
-                                non_benef_after = np.average(df_region['non_benef_apres'], weights=df_region['weight'])
+                    benef = df[T].copy()
+                    non_benef = df[~T].copy()
+
+                    # Convertir les colonnes en numériques pour X_benef et X_non_benef
+                    numeric_cols = benef.select_dtypes(include=['int64', 'float64']).columns
+                    X_cols = [col for col in benef.columns if col not in ['durée_disponibilite_acces_eau_avantH', 'durée_dispisponibilite_acces_eau_apresH', weight_col, 'EAU']]
+                    X_cols = [col for col in X_cols if col in numeric_cols]
+                    if not X_cols:
+                        st.error("Aucune colonne numérique disponible pour l'évaluation d'impact.")
+                    else:
+                        benef[X_cols] = benef[X_cols].apply(pd.to_numeric, errors='coerce')
+                        non_benef[X_cols] = non_benef[X_cols].apply(pd.to_numeric, errors='coerce')
+
+                        X_benef = benef[X_cols].dropna().values
+                        X_non_benef = non_benef[X_cols].dropna().values
+
+                        if X_benef.size == 0 or X_non_benef.size == 0:
+                            st.warning("Aucune donnée numérique valide pour le matching.")
+                        else:
+                            regions = df['Region'].unique()
+                            matches = []
+                            for region in regions:
+                                benef_region = benef[benef['Region'] == region].dropna(subset=X_cols)
+                                non_benef_region = non_benef[non_benef['Region'] == region].dropna(subset=X_cols)
+                                if len(benef_region) > 0 and len(non_benef_region) > 0:
+                                    X_benef_region = benef_region[X_cols].values
+                                    X_non_benef_region = non_benef_region[X_cols].values
+                                    cov_matrix = np.cov(np.vstack([X_benef_region, X_non_benef_region]).T)
+                                    cov_inv = pinv(cov_matrix)
+                                    distances = cdist(X_non_benef_region, X_benef_region, metric='mahalanobis', VI=cov_inv)
+                                    threshold = np.percentile(distances, 90)
+                                    for i in range(len(non_benef_region)):
+                                        min_dist_idx = np.argmin(distances[i])
+                                        if distances[i, min_dist_idx] < threshold:
+                                            matches.append({
+                                                'non_benef_id': non_benef_region.index[i],
+                                                'benef_id': benef_region.index[min_dist_idx],
+                                                'non_benef_avant': non_benef_region.iloc[i]['durée_disponibilite_acces_eau_avantH'],
+                                                'non_benef_apres': non_benef_region.iloc[i]['durée_dispisponibilite_acces_eau_apresH'],
+                                                'benef_avant': benef_region.iloc[min_dist_idx]['durée_disponibilite_acces_eau_avantH'],
+                                                'benef_apres': benef_region.iloc[min_dist_idx]['durée_dispisponibilite_acces_eau_apresH'],
+                                                'weight': non_benef_region.iloc[i][weight_col],
+                                                'Region': region
+                                            })
+                            matched_df = pd.DataFrame(matches)
+                            if not matched_df.empty:
+                                matched_df['benef_weight'] = matched_df.groupby('benef_id')['weight'].transform('sum')
+                                matched_df['adjusted_weight'] = matched_df['weight'] / matched_df['benef_weight']
+                                data = []
+                                for region in regions:
+                                    df_region = matched_df[matched_df['Region'] == region]
+                                    if not df_region.empty:
+                                        benef_before = np.average(df_region['benef_avant'], weights=df_region['adjusted_weight'])
+                                        benef_after = np.average(df_region['benef_apres'], weights=df_region['adjusted_weight'])
+                                        non_benef_before = np.average(df_region['non_benef_avant'], weights=df_region['weight'])
+                                        non_benef_after = np.average(df_region['non_benef_apres'], weights=df_region['weight'])
+                                        benef_diff = benef_after - benef_before
+                                        non_benef_diff = non_benef_after - non_benef_before
+                                        did = benef_diff - non_benef_diff
+                                        data.append({
+                                            'Région': region,
+                                            'Bénéficiaires Avant': round(benef_before, 2),
+                                            'Bénéficiaires Après': round(benef_after, 2),
+                                            'Bénéficiaires Diff': round(benef_diff, 2),
+                                            'Non-bénéficiaires Avant': round(non_benef_before, 2),
+                                            'Non-bénéficiaires Après': round(non_benef_after, 2),
+                                            'Non-bénéficiaires Diff': round(non_benef_diff, 2),
+                                            'DiD': round(did, 2),
+                                            'Effectif Apparié': len(df_region),
+                                            'Poids Total': round(df_region['weight'].sum(), 2)
+                                        })
+                                benef_before = np.average(matched_df['benef_avant'], weights=matched_df['adjusted_weight'])
+                                benef_after = np.average(matched_df['benef_apres'], weights=matched_df['adjusted_weight'])
+                                non_benef_before = np.average(matched_df['non_benef_avant'], weights=matched_df['weight'])
+                                non_benef_after = np.average(matched_df['non_benef_apres'], weights=matched_df['weight'])
                                 benef_diff = benef_after - benef_before
                                 non_benef_diff = non_benef_after - non_benef_before
                                 did = benef_diff - non_benef_diff
                                 data.append({
-                                    'Région': region,
+                                    'Région': 'Total National',
                                     'Bénéficiaires Avant': round(benef_before, 2),
                                     'Bénéficiaires Après': round(benef_after, 2),
                                     'Bénéficiaires Diff': round(benef_diff, 2),
@@ -136,26 +172,7 @@ if uploaded_file is not None:
                                     'Non-bénéficiaires Après': round(non_benef_after, 2),
                                     'Non-bénéficiaires Diff': round(non_benef_diff, 2),
                                     'DiD': round(did, 2),
-                                    'Effectif Apparié': len(df_region),
-                                    'Poids Total': round(df_region['weight'].sum(), 2)
+                                    'Effectif Apparié': len(matched_df),
+                                    'Poids Total': round(matched_df['weight'].sum(), 2)
                                 })
-                        benef_before = np.average(matched_df['benef_avant'], weights=matched_df['adjusted_weight'])
-                        benef_after = np.average(matched_df['benef_apres'], weights=matched_df['adjusted_weight'])
-                        non_benef_before = np.average(matched_df['non_benef_avant'], weights=matched_df['weight'])
-                        non_benef_after = np.average(matched_df['non_benef_apres'], weights=matched_df['weight'])
-                        benef_diff = benef_after - benef_before
-                        non_benef_diff = non_benef_after - non_benef_before
-                        did = benef_diff - non_benef_diff
-                        data.append({
-                            'Région': 'Total National',
-                            'Bénéficiaires Avant': round(benef_before, 2),
-                            'Bénéficiaires Après': round(benef_after, 2),
-                            'Bénéficiaires Diff': round(benef_diff, 2),
-                            'Non-bénéficiaires Avant': round(non_benef_before, 2),
-                            'Non-bénéficiaires Après': round(non_benef_after, 2),
-                            'Non-bénéficiaires Diff': round(non_benef_diff, 2),
-                            'DiD': round(did, 2),
-                            'Effectif Apparié': len(matched_df),
-                            'Poids Total': round(matched_df['weight'].sum(), 2)
-                        })
-                        st.table(pd.DataFrame(data))
+                                st.table(pd.DataFrame(data))
